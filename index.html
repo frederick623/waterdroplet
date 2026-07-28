@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Water &amp; Rain Simulation</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #030306;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+      color: #fff;
+    }
+
+    #canvas-wrap {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    #glcanvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    #overlay-title {
+      position: absolute;
+      top: 16px;
+      left: 20px;
+      font-size: 13px;
+      font-weight: 300;
+      color: rgba(255,255,255,0.35);
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    #no-webgl {
+      display: none;
+      position: absolute;
+      inset: 0;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 12px;
+      background: #050508;
+      font-size: 15px;
+      color: rgba(255,255,255,0.55);
+    }
+    #no-webgl span { font-size: 40px; }
+
+    /* ── Controls panel ── */
+    #controls {
+      background: rgba(6,6,14,0.97);
+      border-top: 1px solid rgba(255,255,255,0.07);
+      padding: 13px 22px;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0 24px;
+      min-height: 60px;
+    }
+
+    .ctrl-group {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+
+    .ctrl-label {
+      font-size: 12px;
+      color: rgba(255,255,255,0.5);
+      white-space: nowrap;
+      letter-spacing: .4px;
+    }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      width: 130px;
+      height: 3px;
+      background: rgba(255,255,255,0.14);
+      border-radius: 2px;
+      outline: none;
+      cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 13px;
+      height: 13px;
+      background: #00c8ff;
+      border-radius: 50%;
+      cursor: pointer;
+      transition: transform .12s;
+      box-shadow: 0 0 6px rgba(0,200,255,.6);
+    }
+    input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.25); }
+    input[type="range"]::-moz-range-thumb {
+      width: 13px; height: 13px;
+      background: #00c8ff;
+      border: none; border-radius: 50%;
+      cursor: pointer;
+    }
+
+    .val-display {
+      font-size: 11px;
+      color: rgba(255,255,255,0.3);
+      min-width: 28px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .sep {
+      width: 1px;
+      height: 26px;
+      background: rgba(255,255,255,0.07);
+    }
+
+    .scene-wrap { display: flex; gap: 6px; }
+
+    .scene-btn {
+      padding: 5px 13px;
+      font-size: 11px;
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.14);
+      color: rgba(255,255,255,0.42);
+      border-radius: 3px;
+      cursor: pointer;
+      transition: all .18s;
+      letter-spacing: .3px;
+    }
+    .scene-btn:hover {
+      border-color: rgba(0,200,255,.4);
+      color: rgba(255,255,255,.7);
+    }
+    .scene-btn.active {
+      background: rgba(0,200,255,.11);
+      border-color: #00c8ff;
+      color: #00c8ff;
+    }
+
+    #fps {
+      margin-left: auto;
+      font-size: 11px;
+      color: rgba(255,255,255,0.18);
+      font-variant-numeric: tabular-nums;
+    }
+  </style>
+</head>
+<body>
+
+<div id="canvas-wrap">
+  <canvas id="glcanvas"></canvas>
+  <div id="overlay-title">Water &amp; Rain Simulation</div>
+  <div id="no-webgl">
+    <span>💧</span>
+    <p>WebGL 2 is required but not available in this browser.</p>
+  </div>
+</div>
+
+<div id="controls">
+  <div class="ctrl-group">
+    <span class="ctrl-label">🌧 Rain</span>
+    <input type="range" id="rainSlider" min="0" max="100" value="30">
+    <span class="val-display" id="rainVal">30</span>
+  </div>
+
+  <div class="sep"></div>
+
+  <div class="ctrl-group">
+    <span class="ctrl-label">💨 Wind</span>
+    <input type="range" id="windSlider" min="-100" max="100" value="0">
+    <span class="val-display" id="windVal">0</span>
+  </div>
+
+  <div class="sep"></div>
+
+  <div class="ctrl-group">
+    <span class="ctrl-label">Scene</span>
+    <div class="scene-wrap">
+      <button class="scene-btn active" id="skyBtn">☀ Day Sky</button>
+      <button class="scene-btn"        id="neonBtn">🌃 Night Neon</button>
+    </div>
+  </div>
+
+  <div id="fps">-- fps</div>
+</div>
+
+<script>
+'use strict';
+
+// ─── Shader sources ──────────────────────────────────────────────────────────
+
+const VERT_SRC = /* glsl */`#version 300 es
+in  vec2 a_pos;
+out vec2 v_uv;
+void main() {
+  v_uv        = a_pos * 0.5 + 0.5;
+  gl_Position = vec4(a_pos, 0.0, 1.0);
+}`;
+
+const FRAG_SRC = /* glsl */`#version 300 es
+precision highp float;
+
+// ── Uniforms ─────────────────────────────────────────────────────────────────
+uniform float uTime;
+uniform vec2  uRes;          // viewport in pixels
+uniform float uRain;         // 0..1
+uniform float uWind;         // -1..1
+uniform int   uScene;        // 0=day sky  1=night neon
+uniform int   uNumDrops;
+uniform vec4  uDrops[64];    // xy=waterUV pos  z=age(s)
+
+in  vec2 v_uv;
+out vec4 fragColor;
+
+// ── Constants ────────────────────────────────────────────────────────────────
+const float PI  = 3.14159265;
+const float TAU = 6.28318530;
+
+// ── Utilities ────────────────────────────────────────────────────────────────
+float hash21(vec2 p) {
+  p = fract(p * vec2(234.34, 435.345));
+  p += dot(p, p + 34.23);
+  return fract(p.x * p.y);
+}
+
+float hash11(float n) {
+  return fract(sin(n * 127.1) * 43758.5453);
+}
+
+float noise2(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash21(i),             hash21(i + vec2(1,0)), f.x),
+             mix(hash21(i + vec2(0,1)), hash21(i + vec2(1,1)), f.x), f.y);
+}
+
+float fbm(vec2 p) {
+  float v = 0.0, a = 0.5;
+  for (int i = 0; i < 5; i++) {
+    v += a * noise2(p);
+    p *= 2.13;
+    a *= 0.5;
+  }
+  return v;
+}
+
+// ── Water height field ───────────────────────────────────────────────────────
+
+// Simplified Gerstner wave (height component only)
+float gerstner(vec2 uv, vec2 dir, float wlen, float amp, float spd) {
+  float k   = TAU / wlen;
+  float phi = k * (dot(normalize(dir), uv) - spd * uTime);
+  return amp * sin(phi);
+}
+
+float baseHeight(vec2 uv) {
+  // Wind shifts wave directions
+  float w = uWind;
+  vec2 d0 = normalize(vec2(1.0 + w * 0.6,  0.4));
+  vec2 d1 = normalize(vec2(0.7 + w * 0.4,  1.0));
+  vec2 d2 = normalize(vec2(-0.4 + w * 0.3, 0.9));
+  vec2 d3 = normalize(vec2(1.3 + w * 0.5, -0.6));
+  vec2 d4 = normalize(vec2(-0.5 + w * 0.2, -0.8));
+  float h  = 0.0;
+  h += gerstner(uv, d0, 0.38, 0.016, 1.0);
+  h += gerstner(uv, d1, 0.20, 0.009, 1.2);
+  h += gerstner(uv, d2, 0.13, 0.006, 0.9);
+  h += gerstner(uv, d3, 0.09, 0.004, 1.4);
+  h += gerstner(uv, d4, 0.06, 0.002, 1.6);
+  return h;
+}
+
+float rippleAt(vec2 uv, vec4 drop) {
+  float age  = drop.z;
+  float r    = age * 0.27;
+  float d    = length(uv - drop.xy);
+  float decay= exp(-age * 1.9);
+  float rw   = 0.007 + age * 0.003;
+  float ring = exp(-pow(d - r, 2.0) / (rw * rw));
+  float wave = sin(d * 42.0 - age * 13.0);
+  return ring * wave * decay * 0.028;
+}
+
+float splashAt(vec2 uv, vec4 drop) {
+  float age = drop.z;
+  if (age > 0.12) return 0.0;
+  float phase = age / 0.12;
+  float r = phase * 0.018;
+  float d = length(uv - drop.xy);
+  return (1.0 - phase) * exp(-pow(d - r, 2.0) * 8000.0);
+}
+
+float totalHeight(vec2 uv) {
+  float h = baseHeight(uv);
+  for (int i = 0; i < 64; i++) {
+    if (i >= uNumDrops) break;
+    h += rippleAt(uv, uDrops[i]);
+  }
+  return h;
+}
+
+vec3 waterNormal(vec2 uv) {
+  const float e = 0.0028;
+  float h0 = totalHeight(uv);
+  float hx = totalHeight(uv + vec2(e, 0));
+  float hy = totalHeight(uv + vec2(0, e));
+  // Surface tangents: Tu=(e, hx-h0, 0), Tv=(0, hy-h0, e)
+  // N = cross(Tv, Tu) -> points upward when surface is flat
+  vec3 Tu = vec3(e,   hx - h0, 0.0);
+  vec3 Tv = vec3(0.0, hy - h0, e  );
+  return normalize(cross(Tv, Tu));
+}
+
+// ── Sky background ───────────────────────────────────────────────────────────
+
+vec3 blueSky(vec3 dir) {
+  float elev = dir.y;
+  if (elev < 0.0) return vec3(0.005, 0.01, 0.02);   // below horizon
+
+  vec3 zenith  = vec3(0.05, 0.18, 0.58);
+  vec3 horizon = vec3(0.58, 0.76, 0.98);
+  vec3 sky     = mix(horizon, zenith, pow(clamp(elev, 0.0, 1.0), 0.48));
+
+  // Haze
+  sky += vec3(0.35, 0.28, 0.18) * exp(-elev * 5.5) * 0.35;
+
+  // Sun
+  vec3  sunDir  = normalize(vec3(0.45, 0.63, 0.63));
+  float sunDot  = dot(dir, sunDir);
+  float sunDisk = smoothstep(0.9990, 0.9997, sunDot);
+  float corona  = exp((sunDot - 1.0) * 6.0) * 0.45;
+  sky += vec3(1.0, 0.97, 0.82) * sunDisk * 2.2;
+  sky += vec3(0.7, 0.45, 0.18) * corona;
+
+  // Clouds
+  vec2 cUV = dir.xz / (elev + 0.12) * 2.0 + vec2(uTime * 0.007, 0.0);
+  float cloud = fbm(cUV * 1.4);
+  cloud = smoothstep(0.46, 0.62, cloud);
+  cloud *= smoothstep(0.02, 0.22, elev) * smoothstep(0.90, 0.60, elev);
+  float cLight = dot(normalize(dir.xz), normalize(sunDir.xz)) * 0.4 + 0.6;
+  vec3  cColor = mix(vec3(0.72, 0.76, 0.82), vec3(1.0, 0.99, 0.97), cLight);
+  sky = mix(sky, cColor, cloud * 0.88);
+
+  return max(sky, vec3(0.0));
+}
+
+vec3 nightNeon(vec3 dir) {
+  float elev = dir.y;
+  if (elev < 0.0) return vec3(0.008, 0.004, 0.015);
+
+  vec3 color = vec3(0.007, 0.007, 0.018);
+
+  // Stars
+  vec2 sv = dir.xz / (elev + 0.06) * 70.0;
+  float s  = hash21(floor(sv));
+  float sm = smoothstep(0.955, 0.975, s) * smoothstep(0.0, 0.18, elev);
+  color += vec3(0.85, 0.90, 1.0) * sm * (sin(uTime * (s * 14.0 + 2.5)) * 0.3 + 0.7);
+
+  // Moon
+  vec3  moonD = normalize(vec3(-0.18, 0.72, 0.52));
+  float mDot  = dot(dir, moonD);
+  color += smoothstep(0.9975, 0.9992, mDot) * 2.8 * vec3(0.93, 0.93, 0.87);
+  color += exp((mDot - 1.0) * 45.0) * 0.12 * vec3(0.6, 0.6, 0.5);
+
+  // City ambient glow
+  color += exp(-elev * 7.0) * 0.38 * vec3(0.11, 0.04, 0.22);
+
+  float az = atan(dir.x, dir.z) / PI;   // −1..1
+
+  // Helper: adds a neon horizontal bar
+  #define NEON_H(ael, aaz, ew, aw, CR, CG, CB) { \
+    float de = abs(elev - (ael)); float da = abs(az - (aaz)); \
+    float body = smoothstep(0.011, 0.002, de) * smoothstep((aw), (aw)-0.06, da); \
+    float g    = exp(-de*de*900.0 - (az-(aaz))*(az-(aaz))*16.0) * 0.45; \
+    color += (body * 3.0 + g) * vec3(CR, CG, CB); }
+
+  // Helper: adds a neon vertical bar
+  #define NEON_V(ael, aaz, ew, aw, CR, CG, CB) { \
+    float de = abs(elev - (ael)); float da = abs(az - (aaz)); \
+    float body = smoothstep(0.012, 0.003, da) * smoothstep((ew), (ew)-0.05, de); \
+    float g    = exp(-de*de*380.0 - (az-(aaz))*(az-(aaz))*55.0) * 0.38; \
+    color += (body * 3.0 + g) * vec3(CR, CG, CB); }
+
+  // Cyan horizontal (left)
+  NEON_H(0.22, -0.36, 0.011, 0.28, 0.0, 0.88, 1.0)
+  // Magenta vertical (right)
+  NEON_V(0.34, 0.50, 0.15, 0.013, 1.0, 0.08, 0.65)
+  // Orange horizontal (center-right)
+  NEON_H(0.14, 0.12, 0.010, 0.38, 1.0, 0.42, 0.0)
+  // Purple vertical (far left)
+  NEON_V(0.50, -0.66, 0.22, 0.013, 0.68, 0.08, 1.0)
+  // Yellow horizontal
+  NEON_H(0.30, 0.78, 0.010, 0.18, 1.0, 0.92, 0.05)
+
+  // Green neon arc / circle
+  {
+    vec2  ce = vec2(-0.14, 0.43);
+    float d  = length(vec2(az, elev) - ce);
+    float arc = smoothstep(0.018, 0.004, abs(d - 0.13));
+    float g   = exp(-(d - 0.13)*(d - 0.13)*280.0) * 0.22;
+    color += (arc * 3.0 + g) * vec3(0.1, 1.0, 0.28);
+  }
+
+  // Red blinking sign
+  {
+    float ael = 0.26, aaz = -0.08;
+    float de  = abs(elev - ael);
+    float da  = abs(az - aaz);
+    float blink = step(0.5, fract(uTime * 1.1));
+    float body  = smoothstep(0.011, 0.003, de) * smoothstep(0.09, 0.05, da) * blink;
+    float g     = exp(-de*de*950.0 - (az-aaz)*(az-aaz)*78.0) * 0.3 * blink;
+    color += (body * 3.2 + g) * vec3(1.0, 0.04, 0.04);
+  }
+
+  #undef NEON_H
+  #undef NEON_V
+
+  return color;
+}
+
+vec3 getBackground(vec3 dir) {
+  return (uScene == 0) ? blueSky(dir) : nightNeon(dir);
+}
+
+// ── Rain streaks ─────────────────────────────────────────────────────────────
+
+float rainStreak(vec2 uv) {
+  if (uRain < 0.01) return 0.0;
+
+  // Tilt by wind
+  float angle = uWind * 0.38;
+  float ca = cos(angle), sa = sin(angle);
+  vec2 suv = vec2(ca * uv.x - sa * uv.y,
+                  sa * uv.x + ca * uv.y);
+
+  float cols = mix(18.0, 55.0, uRain);
+  float sx   = suv.x * cols;
+  float col  = floor(sx);
+  float cx   = fract(sx);
+
+  float h1   = hash11(col);
+  float h2   = hash11(col + 37.0);
+  float h3   = hash11(col + 73.0);
+
+  float spd  = (1.8 + h1 * 1.8) * (1.0 + uRain * 0.8);
+  float sy   = suv.y * 0.28 + uTime * spd * 0.1 + h2;
+  float cy   = fract(sy);
+
+  float len  = 0.032 + h3 * 0.048;
+  float streak = smoothstep(0.0, 0.008, cy) * smoothstep(len, len * 0.65, cy);
+
+  float w  = 0.10 + hash11(col + 111.0) * 0.12;
+  float wm = smoothstep(0.5 - w, 0.5 - w + 0.04, cx) *
+             smoothstep(0.5 + w, 0.5 + w - 0.04, cx);
+
+  return streak * wm * uRain * 0.85;
+}
+
+// ── Main ─────────────────────────────────────────────────────────────────────
+
+void main() {
+  vec2 ndc  = v_uv * 2.0 - 1.0;
+  ndc.x    *= uRes.x / uRes.y;
+
+  // Camera: above water, looking slightly forward
+  vec3 camPos    = vec3(0.5, 1.2, -0.62);
+  vec3 camTarget = vec3(0.5 + uWind * 0.09, 0.0, 0.58);
+
+  vec3 fwd   = normalize(camTarget - camPos);
+  vec3 right = normalize(cross(fwd, vec3(0.0, 1.0, 0.0)));
+  vec3 up    = cross(right, fwd);
+
+  float fov    = 0.72;
+  vec3  rayDir = normalize(fwd + right * ndc.x * fov + up * ndc.y * fov);
+
+  // Intersect with water plane y = 0
+  bool  onWater = false;
+  float tW      = 0.0;
+  vec2  waterUV = vec2(0.5);
+  vec3  color   = vec3(0.0);
+
+  if (rayDir.y < -0.001) {
+    tW = -camPos.y / rayDir.y;
+    vec3 hit = camPos + rayDir * tW;
+    if (hit.x > -0.7 && hit.x < 1.7 && hit.z > -0.3 && hit.z < 2.2) {
+      onWater  = true;
+      waterUV  = hit.xz;
+    }
+  }
+
+  if (!onWater) {
+    // Show sky / neon directly (above horizon or out of bounds)
+    color = getBackground(rayDir);
+  } else {
+    // ── Water surface ──
+    vec3 N = waterNormal(waterUV);
+    vec3 V = -rayDir;               // view direction (surface → camera)
+    vec3 R = reflect(rayDir, N);    // reflection direction
+
+    // Fresnel (Schlick)
+    float cosT   = max(dot(N, V), 0.0);
+    float F0     = 0.036;
+    float fresnel= F0 + (1.0 - F0) * pow(1.0 - cosT, 5.0);
+    fresnel      = clamp(fresnel + 0.08, 0.0, 1.0);
+
+    // Reflected background
+    vec3 refl = getBackground(R);
+
+    // Water body (refraction approximation)
+    vec3 body = (uScene == 0)
+              ? vec3(0.008, 0.028, 0.062)
+              : vec3(0.005, 0.003, 0.014);
+
+    color = mix(body, refl, fresnel);
+
+    // Specular
+    if (uScene == 0) {
+      vec3  sunD = normalize(vec3(0.45, 0.63, 0.63));
+      float sp   = pow(max(dot(R, sunD), 0.0), 320.0);
+      float spW  = pow(max(dot(R, sunD), 0.0), 28.0) * 0.07;
+      color += (sp + spW) * vec3(1.0, 0.97, 0.86) * 1.6;
+    } else {
+      // Soft neon specular: boost the already-captured reflection highlights
+      vec3 hdr = max(refl - vec3(0.5), vec3(0.0));
+      color += hdr * hdr * 0.35;
+    }
+
+    // Wave-crest foam (stronger with wind)
+    float wh   = baseHeight(waterUV);
+    float foam = smoothstep(0.020, 0.038, wh) * smoothstep(0.08, 0.45, abs(uWind));
+    color = mix(color, vec3(0.93, 0.96, 1.0), foam * 0.52);
+
+    // Raindrop splashes (bright white flashes on impact)
+    float splashSum = 0.0;
+    for (int i = 0; i < 64; i++) {
+      if (i >= uNumDrops) break;
+      splashSum += splashAt(waterUV, uDrops[i]);
+    }
+    color += vec3(0.88, 0.94, 1.0) * clamp(splashSum * 3.5, 0.0, 0.55);
+
+    // Atmospheric fog with distance
+    float fog = 1.0 - exp(-tW * 0.038);
+    vec3 fogC = (uScene == 0)
+              ? vec3(0.50, 0.66, 0.84)
+              : vec3(0.012, 0.006, 0.022);
+    color = mix(color, fogC, fog * 0.45);
+  }
+
+  // Rain streaks overlay (over both water and sky regions)
+  float sk = rainStreak(v_uv);
+  if (sk > 0.0) {
+    vec3 skC = (uScene == 0) ? vec3(0.80, 0.86, 0.93) : vec3(0.28, 0.34, 0.52);
+    color = mix(color, skC * (onWater ? 1.0 : 1.5), sk * (onWater ? 0.38 : 0.58));
+  }
+
+  // Subtle vignette
+  float vign = 1.0 - dot(v_uv * 2.0 - 1.0, v_uv * 2.0 - 1.0) * 0.18;
+  color *= vign;
+
+  // Tone-map (Reinhard) + gamma
+  color  = color / (color + vec3(1.0));
+  color  = pow(max(color, vec3(0.0)), vec3(1.0 / 2.2));
+
+  fragColor = vec4(color, 1.0);
+}`;
+
+// ─── WebGL initialisation ─────────────────────────────────────────────────────
+
+const canvas = document.getElementById('glcanvas');
+const noWebGL = document.getElementById('no-webgl');
+
+const gl = canvas.getContext('webgl2');
+if (!gl) {
+  noWebGL.style.display = 'flex';
+  canvas.style.display = 'none';
+  throw new Error('WebGL 2 not available');
+}
+
+function compileShader(type, src) {
+  const sh = gl.createShader(type);
+  gl.shaderSource(sh, src);
+  gl.compileShader(sh);
+  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+    const log = gl.getShaderInfoLog(sh);
+    gl.deleteShader(sh);
+    throw new Error('Shader compile error:\n' + log);
+  }
+  return sh;
+}
+
+function createProgram(vsrc, fsrc) {
+  const vs   = compileShader(gl.VERTEX_SHADER,   vsrc);
+  const fs   = compileShader(gl.FRAGMENT_SHADER, fsrc);
+  const prog = gl.createProgram();
+  gl.attachShader(prog, vs);
+  gl.attachShader(prog, fs);
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+    throw new Error('Program link error:\n' + gl.getProgramInfoLog(prog));
+  }
+  gl.deleteShader(vs);
+  gl.deleteShader(fs);
+  return prog;
+}
+
+const prog = createProgram(VERT_SRC, FRAG_SRC);
+
+// Full-screen quad
+const vao = gl.createVertexArray();
+gl.bindVertexArray(vao);
+const vbo = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+  -1,-1,  1,-1,  -1,1,
+   1,-1,  1, 1,  -1,1,
+]), gl.STATIC_DRAW);
+const loc_pos = gl.getAttribLocation(prog, 'a_pos');
+gl.enableVertexAttribArray(loc_pos);
+gl.vertexAttribPointer(loc_pos, 2, gl.FLOAT, false, 0, 0);
+gl.bindVertexArray(null);
+
+// Uniform locations
+const uloc = {
+  time     : gl.getUniformLocation(prog, 'uTime'),
+  res      : gl.getUniformLocation(prog, 'uRes'),
+  rain     : gl.getUniformLocation(prog, 'uRain'),
+  wind     : gl.getUniformLocation(prog, 'uWind'),
+  scene    : gl.getUniformLocation(prog, 'uScene'),
+  numDrops : gl.getUniformLocation(prog, 'uNumDrops'),
+  drops    : gl.getUniformLocation(prog, 'uDrops'),
+};
+
+// ─── Simulation state ─────────────────────────────────────────────────────────
+
+const MAX_DROPS  = 64;
+const DROP_MAX_AGE = 4.2;         // seconds until a drop expires
+
+let drops        = [];             // [{x,y,age}]
+let rainIntensity= 0.30;           // 0..1
+let wind         = 0.0;            // -1..1
+let scene        = 0;              // 0=sky  1=neon
+
+// Float32Array laid out as [x0,y0,age0,0,  x1,y1,age1,0, ...]
+const dropBuf = new Float32Array(MAX_DROPS * 4);
+
+function spawnDrops(dt) {
+  const rate        = rainIntensity * 28.0;  // drops/s at full intensity
+  const expected    = rate * dt;
+  const n           = Math.floor(expected) + (Math.random() < (expected % 1) ? 1 : 0);
+  for (let i = 0; i < n && drops.length < MAX_DROPS; i++) {
+    drops.push({ x: Math.random(), y: Math.random(), age: 0.0 });
+  }
+}
+
+function updateDrops(dt) {
+  for (const d of drops) d.age += dt;
+  drops = drops.filter(d => d.age < DROP_MAX_AGE);
+}
+
+function buildDropBuf() {
+  dropBuf.fill(-1.0);
+  const count = Math.min(drops.length, MAX_DROPS);
+  for (let i = 0; i < count; i++) {
+    dropBuf[i * 4]     = drops[i].x;
+    dropBuf[i * 4 + 1] = drops[i].y;
+    dropBuf[i * 4 + 2] = drops[i].age;
+    dropBuf[i * 4 + 3] = 0.0;
+  }
+  return count;
+}
+
+// ─── Render loop ──────────────────────────────────────────────────────────────
+
+const fpsEl = document.getElementById('fps');
+let lastTimestamp = 0;
+let fpsFrames = 0, fpsAccum = 0;
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  const w   = Math.round(canvas.clientWidth  * dpr);
+  const h   = Math.round(canvas.clientHeight * dpr);
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width  = w;
+    canvas.height = h;
+    gl.viewport(0, 0, w, h);
+  }
+}
+
+function frame(ts) {
+  const dt = Math.min((ts - lastTimestamp) / 1000, 0.05);
+  lastTimestamp = ts;
+
+  // FPS
+  fpsAccum  += dt;
+  fpsFrames += 1;
+  if (fpsAccum >= 0.5) {
+    fpsEl.textContent = Math.round(fpsFrames / fpsAccum) + ' fps';
+    fpsAccum  = 0;
+    fpsFrames = 0;
+  }
+
+  // Simulation
+  spawnDrops(dt);
+  updateDrops(dt);
+  const numDrops = buildDropBuf();
+
+  // Draw
+  resize();
+  gl.clearColor(0, 0, 0, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.useProgram(prog);
+
+  gl.uniform1f(uloc.time,     ts / 1000.0);
+  gl.uniform2f(uloc.res,      canvas.width, canvas.height);
+  gl.uniform1f(uloc.rain,     rainIntensity);
+  gl.uniform1f(uloc.wind,     wind);
+  gl.uniform1i(uloc.scene,    scene);
+  gl.uniform1i(uloc.numDrops, numDrops);
+  gl.uniform4fv(uloc.drops,   dropBuf);
+
+  gl.bindVertexArray(vao);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+  gl.bindVertexArray(null);
+
+  requestAnimationFrame(frame);
+}
+
+requestAnimationFrame(ts => { lastTimestamp = ts; requestAnimationFrame(frame); });
+
+// ─── UI controls ──────────────────────────────────────────────────────────────
+
+const rainSlider = document.getElementById('rainSlider');
+const windSlider = document.getElementById('windSlider');
+const rainValEl  = document.getElementById('rainVal');
+const windValEl  = document.getElementById('windVal');
+const skyBtn     = document.getElementById('skyBtn');
+const neonBtn    = document.getElementById('neonBtn');
+
+rainSlider.addEventListener('input', () => {
+  const v = parseInt(rainSlider.value);
+  rainValEl.textContent = v;
+  rainIntensity = v / 100.0;
+});
+
+windSlider.addEventListener('input', () => {
+  const v = parseInt(windSlider.value);
+  windValEl.textContent = v;
+  wind = v / 100.0;
+});
+
+function setScene(s) {
+  scene = s;
+  skyBtn .classList.toggle('active', s === 0);
+  neonBtn.classList.toggle('active', s === 1);
+}
+
+skyBtn .addEventListener('click', () => setScene(0));
+neonBtn.addEventListener('click', () => setScene(1));
+
+window.addEventListener('resize', resize);
+</script>
+</body>
+</html>
