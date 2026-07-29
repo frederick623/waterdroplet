@@ -464,7 +464,7 @@ vec3 nightNeon(vec3 dir) {
 
 float nightAmount() {
   return smoothstep(0.40, 0.56, uDayPhase) *
-         (1.0 - smoothstep(0.74, 0.82, uDayPhase));
+         (1.0 - smoothstep(0.72, 0.80, uDayPhase));
 }
 
 float darkAmount() {
@@ -509,12 +509,12 @@ vec3 getBackground(vec3 dir) {
   sky = mix(sky, magicSky(dir), magicAmount());
   sky = mix(sky, vec3(0.002, 0.002, 0.006), darkAmount());
   sky = mix(sky, dawnPurpleSky(dir),
-            smoothstep(0.87, 0.92, uDayPhase) *
-            (1.0 - smoothstep(0.93, 0.96, uDayPhase)));
+            smoothstep(0.84, 0.89, uDayPhase) *
+            (1.0 - smoothstep(0.92, 0.96, uDayPhase)));
   sky = mix(sky, dawnGoldSky(dir),
-            smoothstep(0.93, 0.96, uDayPhase) *
-            (1.0 - smoothstep(0.98, 1.00, uDayPhase)));
-  return mix(sky, blueSky(dir), smoothstep(0.98, 1.00, uDayPhase));
+            smoothstep(0.91, 0.95, uDayPhase) *
+            (1.0 - smoothstep(0.985, 1.00, uDayPhase)));
+  return mix(sky, blueSky(dir), smoothstep(0.985, 1.00, uDayPhase));
 }
 
 float broadGlow(vec2 uv, float center, float width, float drift) {
@@ -735,8 +735,9 @@ const DROP_MAX_AGE = 4.2;         // seconds until a drop expires
 const RANDOM_RAIN_INTERVAL = 12000;
 const RANDOM_WIND_INTERVAL = 5000;
 const RAIN_TRANSITION_RATE = 0.45;
-const WIND_TRANSITION_RATE = 0.2;
 const MAX_EFFECTIVE_WIND = 1.0 / 14.0;
+const WIND_ACCELERATION = MAX_EFFECTIVE_WIND / 4.0;
+const WIND_DECELERATION = MAX_EFFECTIVE_WIND / 3.0;
 
 let drops        = [];             // [{x,y,age}]
 let rainIntensity= 0.20;           // 0..1
@@ -797,9 +798,12 @@ function frame(ts) {
   const dt = Math.min((ts - lastTimestamp) / 1000, 0.05);
   lastTimestamp = ts;
   const rainSmoothing = 1.0 - Math.exp(-RAIN_TRANSITION_RATE * dt);
-  const windSmoothing = 1.0 - Math.exp(-WIND_TRANSITION_RATE * dt);
   rainIntensity += (rainTarget - rainIntensity) * rainSmoothing;
-  wind += (windTarget - wind) * windSmoothing;
+  const windDelta = windTarget - wind;
+  const windRate = Math.abs(windTarget) < Math.abs(wind)
+    ? WIND_DECELERATION
+    : WIND_ACCELERATION;
+  wind += Math.sign(windDelta) * Math.min(Math.abs(windDelta), windRate * dt);
   if (randomRain.checked) updateRainDisplay();
 
   // FPS
