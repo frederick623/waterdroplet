@@ -11,7 +11,7 @@ A WebGL 2 desktop simulation of water, rain, and reflections — just for fun.
 | **Random rain / wind** | Random rain selects a new target every 12 seconds and eases gradually between values. Random wind selects values across the full −50 to 50 range every 5 seconds; moving a slider disables its random mode. |
 | **Day Sky** | Blue sky with animated clouds, atmospheric haze, and a sun + corona reflected in the water. |
 | **Night Neon** | Dark sky with stars, moon, city-horizon glow, and six coloured neon signs (one blinks) reflected in the water. |
-| **Time mode** | Runs a two-minute loop through blue sky, sunset, magic hour, neon night, a fade to darkness, and sunrise. |
+| **Time mode** | Runs a ten-minute timelapse through blue sky, sunset, magic hour, neon night, a fade to darkness, and sunrise. |
 
 Additional visual details:
 - Perspective ray-cast camera looking at the water plane
