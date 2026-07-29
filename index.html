@@ -7,19 +7,22 @@
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
+    html, body {
+      width: 100%;
+      height: 100%;
+    }
+
     body {
       background: #030306;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
-      display: flex;
-      flex-direction: column;
-      height: 100vh;
+      margin: 0;
       overflow: hidden;
       color: #fff;
     }
 
     #canvas-wrap {
-      flex: 1;
-      position: relative;
+      position: fixed;
+      inset: 0;
       overflow: hidden;
     }
 
@@ -56,9 +59,16 @@
     }
     #no-webgl span { font-size: 40px; }
 
-    /* ── Controls panel ── */
+    /* ── Controls panel (overlay so water is truly full-screen) ── */
     #controls {
-      background: rgba(6,6,14,0.97);
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 10;
+      background: rgba(6,6,14,0.82);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
       border-top: 1px solid rgba(255,255,255,0.07);
       padding: 13px 22px;
       display: flex;
@@ -256,6 +266,7 @@ float fbm(vec2 p) {
 // ── Water height field ───────────────────────────────────────────────────────
 
 // Simplified Gerstner wave (height component only)
+// Phase is frozen when spd == 0 so calm water stays static.
 float gerstner(vec2 uv, vec2 dir, float wlen, float amp, float spd) {
   float k   = TAU / wlen;
   float phi = k * (dot(normalize(dir), uv) - spd * uTime);
@@ -263,7 +274,13 @@ float gerstner(vec2 uv, vec2 dir, float wlen, float amp, float spd) {
 }
 
 float baseHeight(vec2 uv) {
-  // Wind shifts wave directions
+  // Still water when there is no wind — only rain ripples disturb the surface.
+  float windMag = abs(uWind);
+  if (windMag < 0.001) return 0.0;
+
+  // Amplitude and travel speed both grow with wind; no perpetual stream motion.
+  float ampScale = smoothstep(0.0, 0.35, windMag) * windMag;
+  float spdScale = mix(0.15, 1.0, windMag);
   float w = uWind;
   vec2 d0 = normalize(vec2(1.0 + w * 0.6,  0.4));
   vec2 d1 = normalize(vec2(0.7 + w * 0.4,  1.0));
@@ -271,32 +288,37 @@ float baseHeight(vec2 uv) {
   vec2 d3 = normalize(vec2(1.3 + w * 0.5, -0.6));
   vec2 d4 = normalize(vec2(-0.5 + w * 0.2, -0.8));
   float h  = 0.0;
-  h += gerstner(uv, d0, 0.38, 0.016, 1.0);
-  h += gerstner(uv, d1, 0.20, 0.009, 1.2);
-  h += gerstner(uv, d2, 0.13, 0.006, 0.9);
-  h += gerstner(uv, d3, 0.09, 0.004, 1.4);
-  h += gerstner(uv, d4, 0.06, 0.002, 1.6);
+  h += gerstner(uv, d0, 0.42, 0.022 * ampScale, 0.85 * spdScale);
+  h += gerstner(uv, d1, 0.24, 0.012 * ampScale, 1.05 * spdScale);
+  h += gerstner(uv, d2, 0.15, 0.007 * ampScale, 0.80 * spdScale);
+  h += gerstner(uv, d3, 0.10, 0.004 * ampScale, 1.20 * spdScale);
+  h += gerstner(uv, d4, 0.07, 0.002 * ampScale, 1.40 * spdScale);
   return h;
 }
 
 float rippleAt(vec2 uv, vec4 drop) {
   float age  = drop.z;
-  float r    = age * 0.27;
+  // Expanding concentric rings that settle — not a continuous flow.
+  float r    = age * 0.22;
   float d    = length(uv - drop.xy);
-  float decay= exp(-age * 1.9);
-  float rw   = 0.007 + age * 0.003;
-  float ring = exp(-pow(d - r, 2.0) / (rw * rw));
-  float wave = sin(d * 42.0 - age * 13.0);
-  return ring * wave * decay * 0.028;
+  float decay= exp(-age * 2.4);
+  float rw   = 0.005 + age * 0.0045;
+  float ring = exp(-pow(d - r, 2.0) / max(rw * rw, 1e-6));
+  // Secondary ring lags behind the primary front
+  float r2   = max(r - 0.035, 0.0);
+  float rw2  = rw * 1.35;
+  float ring2= exp(-pow(d - r2, 2.0) / max(rw2 * rw2, 1e-6)) * 0.45;
+  float wave = sin((d - r) * 55.0);
+  return (ring + ring2) * wave * decay * 0.032;
 }
 
 float splashAt(vec2 uv, vec4 drop) {
   float age = drop.z;
-  if (age > 0.12) return 0.0;
-  float phase = age / 0.12;
-  float r = phase * 0.018;
+  if (age > 0.14) return 0.0;
+  float phase = age / 0.14;
+  float r = phase * 0.014;
   float d = length(uv - drop.xy);
-  return (1.0 - phase) * exp(-pow(d - r, 2.0) * 8000.0);
+  return (1.0 - phase) * exp(-pow(d - r, 2.0) * 12000.0);
 }
 
 float totalHeight(vec2 uv) {
@@ -436,13 +458,13 @@ vec3 getBackground(vec3 dir) {
 float rainStreak(vec2 uv) {
   if (uRain < 0.01) return 0.0;
 
-  // Tilt by wind
-  float angle = uWind * 0.38;
+  // Tilt by wind (screen-space streaks only — not the water surface)
+  float angle = uWind * 0.32;
   float ca = cos(angle), sa = sin(angle);
   vec2 suv = vec2(ca * uv.x - sa * uv.y,
                   sa * uv.x + ca * uv.y);
 
-  float cols = mix(18.0, 55.0, uRain);
+  float cols = mix(14.0, 42.0, uRain);
   float sx   = suv.x * cols;
   float col  = floor(sx);
   float cx   = fract(sx);
@@ -451,18 +473,21 @@ float rainStreak(vec2 uv) {
   float h2   = hash11(col + 37.0);
   float h3   = hash11(col + 73.0);
 
-  float spd  = (1.8 + h1 * 1.8) * (1.0 + uRain * 0.8);
-  float sy   = suv.y * 0.28 + uTime * spd * 0.1 + h2;
+  // Sparse columns so streaks read as discrete drops, not a flowing sheet
+  if (h1 > mix(0.22, 0.62, uRain)) return 0.0;
+
+  float spd  = (2.2 + h1 * 1.4) * (1.0 + uRain * 0.5);
+  float sy   = suv.y * mix(0.55, 0.35, uRain) + uTime * spd * 0.14 + h2;
   float cy   = fract(sy);
 
-  float len  = 0.032 + h3 * 0.048;
-  float streak = smoothstep(0.0, 0.008, cy) * smoothstep(len, len * 0.65, cy);
+  float len  = 0.018 + h3 * 0.028;
+  float streak = smoothstep(0.0, 0.004, cy) * smoothstep(len, len * 0.55, cy);
 
-  float w  = 0.10 + hash11(col + 111.0) * 0.12;
-  float wm = smoothstep(0.5 - w, 0.5 - w + 0.04, cx) *
-             smoothstep(0.5 + w, 0.5 + w - 0.04, cx);
+  float w  = 0.045 + hash11(col + 111.0) * 0.05;
+  float wm = smoothstep(0.5 - w, 0.5, cx) *
+             smoothstep(0.5 + w, 0.5, cx);
 
-  return streak * wm * uRain * 0.85;
+  return streak * wm * mix(0.35, 0.75, uRain);
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -471,34 +496,35 @@ void main() {
   vec2 ndc  = v_uv * 2.0 - 1.0;
   ndc.x    *= uRes.x / uRes.y;
 
-  // Camera: above water, looking slightly forward
-  vec3 camPos    = vec3(0.5, 1.2, -0.62);
-  vec3 camTarget = vec3(0.5 + uWind * 0.09, 0.0, 0.58);
+  // Camera: high enough and angled so the infinite water plane fills the screen.
+  // Slight wind lean keeps the view dynamic without sliding the surface itself.
+  vec3 camPos    = vec3(0.5, 1.55, 0.05);
+  vec3 camTarget = vec3(0.5 + uWind * 0.05, 0.0, 1.05);
 
   vec3 fwd   = normalize(camTarget - camPos);
   vec3 right = normalize(cross(fwd, vec3(0.0, 1.0, 0.0)));
   vec3 up    = cross(right, fwd);
 
-  float fov    = 0.72;
+  float fov    = 0.85;
   vec3  rayDir = normalize(fwd + right * ndc.x * fov + up * ndc.y * fov);
 
-  // Intersect with water plane y = 0
+  // Infinite water plane y = 0 — full-screen surface (sky only via reflection)
   bool  onWater = false;
   float tW      = 0.0;
   vec2  waterUV = vec2(0.5);
   vec3  color   = vec3(0.0);
 
-  if (rayDir.y < -0.001) {
+  if (rayDir.y < -0.0001) {
     tW = -camPos.y / rayDir.y;
-    vec3 hit = camPos + rayDir * tW;
-    if (hit.x > -0.7 && hit.x < 1.7 && hit.z > -0.3 && hit.z < 2.2) {
+    if (tW > 0.0) {
+      vec3 hit = camPos + rayDir * tW;
       onWater  = true;
       waterUV  = hit.xz;
     }
   }
 
   if (!onWater) {
-    // Show sky / neon directly (above horizon or out of bounds)
+    // Rare grazing/upward rays: fall back to sky
     color = getBackground(rayDir);
   } else {
     // ── Water surface ──
@@ -534,32 +560,32 @@ void main() {
       color += hdr * hdr * 0.35;
     }
 
-    // Wave-crest foam (stronger with wind)
+    // Wave-crest foam only when wind is driving real waves
     float wh   = baseHeight(waterUV);
-    float foam = smoothstep(0.020, 0.038, wh) * smoothstep(0.08, 0.45, abs(uWind));
-    color = mix(color, vec3(0.93, 0.96, 1.0), foam * 0.52);
+    float foam = smoothstep(0.012, 0.030, wh) * smoothstep(0.15, 0.55, abs(uWind));
+    color = mix(color, vec3(0.93, 0.96, 1.0), foam * 0.48);
 
-    // Raindrop splashes (bright white flashes on impact)
+    // Raindrop splashes (brief white flash on impact)
     float splashSum = 0.0;
     for (int i = 0; i < 64; i++) {
       if (i >= uNumDrops) break;
       splashSum += splashAt(waterUV, uDrops[i]);
     }
-    color += vec3(0.88, 0.94, 1.0) * clamp(splashSum * 3.5, 0.0, 0.55);
+    color += vec3(0.88, 0.94, 1.0) * clamp(splashSum * 2.8, 0.0, 0.45);
 
     // Atmospheric fog with distance
-    float fog = 1.0 - exp(-tW * 0.038);
+    float fog = 1.0 - exp(-tW * 0.028);
     vec3 fogC = (uScene == 0)
               ? vec3(0.50, 0.66, 0.84)
               : vec3(0.012, 0.006, 0.022);
-    color = mix(color, fogC, fog * 0.45);
+    color = mix(color, fogC, fog * 0.40);
   }
 
-  // Rain streaks overlay (over both water and sky regions)
+  // Rain streaks overlay — thin falling drops, not a moving sheet on the water
   float sk = rainStreak(v_uv);
   if (sk > 0.0) {
-    vec3 skC = (uScene == 0) ? vec3(0.80, 0.86, 0.93) : vec3(0.28, 0.34, 0.52);
-    color = mix(color, skC * (onWater ? 1.0 : 1.5), sk * (onWater ? 0.38 : 0.58));
+    vec3 skC = (uScene == 0) ? vec3(0.78, 0.84, 0.92) : vec3(0.32, 0.38, 0.55);
+    color = mix(color, skC, sk * 0.42);
   }
 
   // Subtle vignette
@@ -642,22 +668,33 @@ const uloc = {
 // ─── Simulation state ─────────────────────────────────────────────────────────
 
 const MAX_DROPS  = 64;
-const DROP_MAX_AGE = 4.2;         // seconds until a drop expires
+const DROP_MAX_AGE = 3.2;         // seconds until a drop expires
 
-let drops        = [];             // [{x,y,age}]
+let drops        = [];             // [{x,y,age}]  water-plane xz
 let rainIntensity= 0.30;           // 0..1
 let wind         = 0.0;            // -1..1
 let scene        = 0;              // 0=sky  1=neon
+
+// Visible water-plane span for the full-screen camera (xz)
+const SPAWN_X0 = -0.6, SPAWN_X1 = 1.6;
+const SPAWN_Z0 =  0.15, SPAWN_Z1 = 2.6;
 
 // Float32Array laid out as [x0,y0,age0,0,  x1,y1,age1,0, ...]
 const dropBuf = new Float32Array(MAX_DROPS * 4);
 
 function spawnDrops(dt) {
-  const rate        = rainIntensity * 28.0;  // drops/s at full intensity
+  // Fewer, clearer impacts so rain reads as discrete drops on still water
+  const rate        = rainIntensity * 18.0;  // drops/s at full intensity
   const expected    = rate * dt;
   const n           = Math.floor(expected) + (Math.random() < (expected % 1) ? 1 : 0);
   for (let i = 0; i < n && drops.length < MAX_DROPS; i++) {
-    drops.push({ x: Math.random(), y: Math.random(), age: 0.0 });
+    // Bias slightly toward camera-near water so ripples stay readable
+    const zx = Math.random();
+    const z  = SPAWN_Z0 + (SPAWN_Z1 - SPAWN_Z0) * (zx * zx * 0.35 + zx * 0.65);
+    // Wind drifts impact points slightly downwind
+    const xDrift = wind * 0.12 * Math.random();
+    const x  = SPAWN_X0 + Math.random() * (SPAWN_X1 - SPAWN_X0) + xDrift;
+    drops.push({ x, y: z, age: 0.0 });
   }
 }
 
