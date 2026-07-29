@@ -736,8 +736,6 @@ const RANDOM_RAIN_INTERVAL = 12000;
 const RANDOM_WIND_INTERVAL = 5000;
 const RAIN_TRANSITION_RATE = 0.45;
 const MAX_EFFECTIVE_WIND = 1.0 / 14.0;
-const WIND_ACCELERATION = MAX_EFFECTIVE_WIND / 4.0;
-const WIND_DECELERATION = MAX_EFFECTIVE_WIND / 3.0;
 
 let drops        = [];             // [{x,y,age}]
 let rainIntensity= 0.20;           // 0..1
@@ -799,12 +797,9 @@ function frame(ts) {
   lastTimestamp = ts;
   const rainSmoothing = 1.0 - Math.exp(-RAIN_TRANSITION_RATE * dt);
   rainIntensity += (rainTarget - rainIntensity) * rainSmoothing;
-  const windDelta = windTarget - wind;
-  const windRate = Math.abs(windTarget) < Math.abs(wind)
-    ? WIND_DECELERATION
-    : WIND_ACCELERATION;
-  wind += Math.sign(windDelta) * Math.min(Math.abs(windDelta), windRate * dt);
+  wind += (windTarget - wind) * rainSmoothing;
   if (randomRain.checked) updateRainDisplay();
+  if (randomWind.checked) updateWindDisplay();
 
   // FPS
   fpsAccum  += dt;
@@ -879,6 +874,12 @@ function setWind(value) {
   windSlider.value = v;
   windValEl.textContent = v;
   windTarget = v / 50.0 * MAX_EFFECTIVE_WIND;
+}
+
+function updateWindDisplay() {
+  const v = Math.round(wind / MAX_EFFECTIVE_WIND * 50);
+  windSlider.value = v;
+  windValEl.textContent = v;
 }
 
 function chooseWindTarget() {
