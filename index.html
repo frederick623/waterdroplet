@@ -734,6 +734,7 @@ const MAX_DROPS  = 64;
 const DROP_MAX_AGE = 4.2;         // seconds until a drop expires
 const RANDOM_RAIN_INTERVAL = 12000;
 const RANDOM_WIND_INTERVAL = 5000;
+const RANDOM_WIND_STEP_STD_DEV = 10;
 const RAIN_TRANSITION_RATE = 0.45;
 const MAX_EFFECTIVE_WIND = 1.0 / 14.0;
 
@@ -883,7 +884,12 @@ function updateWindDisplay() {
 }
 
 function chooseWindTarget() {
-  setWind(Math.round(Math.random() * 100.0 - 50.0));
+  const currentTarget = windTarget / MAX_EFFECTIVE_WIND * 50;
+  const u1 = 1.0 - Math.random();
+  const u2 = Math.random();
+  const step = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2)
+    * RANDOM_WIND_STEP_STD_DEV;
+  setWind(currentTarget + step);
 }
 
 function setDayLength(value) {
