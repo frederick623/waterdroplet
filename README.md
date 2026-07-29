@@ -12,7 +12,7 @@ A WebGL 2 desktop simulation of water, rain, and reflections — just for fun.
 | **Day Sky** | Blue sky with animated clouds, atmospheric haze, and a sun + corona reflected in the water. |
 | **Night Neon** | Dark sky with stars, moon, city-horizon glow, and six coloured neon signs (one blinks) reflected in the water. |
 | **Day length slider** | Sets the Time mode's simulated day duration from 1 to 10 minutes. |
-| **Time mode** | Runs a configurable timelapse through blue sky, sunset, magic hour, neon night, a fade to darkness, and sunrise. |
+| **Time mode** | Runs a configurable timelapse through blue sky, sunset, magic hour, neon night, darkness, purple dawn, gold sunrise, and blue sky. |
 
 Additional visual details:
 - Perspective ray-cast camera looking at the water plane
