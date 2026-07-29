@@ -7,10 +7,11 @@ A WebGL 2 desktop simulation of water, rain, and reflections — just for fun.
 | Control | Description |
 |---|---|
 | **Rain slider** | Tune rain intensity from calm (0) to heavy downpour (100). Spawns up to 64 simultaneous ripple rings. |
-| **Wind variation slider** | Sets the maximum random wind variation from calm (0) to ±15, capped at one-seventh of the former maximum strength. Affects Gerstner wave direction, rain streak angle, wave-crest foam, and camera tilt. |
-| **Random rain / wind** | Smoothly transitions to a new random rain value or wind value every 1.8 seconds; moving a slider disables its random mode. |
+| **Wind slider** | Sets a steady wind from −50 to 50. The endpoints retain the former effective maximum magnitude (previously 15), affecting wave direction, rain-streak angle, and wave-crest foam. |
+| **Random rain / wind** | Random rain selects a new target every 12 seconds and eases gradually between values. Random wind selects values across the full −50 to 50 range every 5 seconds; moving a slider disables its random mode. |
 | **Day Sky** | Blue sky with animated clouds, atmospheric haze, and a sun + corona reflected in the water. |
 | **Night Neon** | Dark sky with stars, moon, city-horizon glow, and six coloured neon signs (one blinks) reflected in the water. |
+| **Time mode** | Runs a two-minute loop through blue sky, sunset, magic hour, neon night, a fade to darkness, and sunrise. |
 
 Additional visual details:
 - Perspective ray-cast camera looking at the water plane
