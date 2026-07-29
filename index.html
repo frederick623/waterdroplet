@@ -203,6 +203,14 @@
   <div class="sep"></div>
 
   <div class="ctrl-group">
+    <span class="ctrl-label">🕒 Day length</span>
+    <input type="range" id="dayLengthSlider" min="1" max="10" value="10">
+    <span class="val-display" id="dayLengthVal">10 min</span>
+  </div>
+
+  <div class="sep"></div>
+
+  <div class="ctrl-group">
     <span class="ctrl-label">Scene</span>
     <div class="scene-wrap">
       <button class="scene-btn active" id="skyBtn">☀ Day Sky</button>
@@ -286,7 +294,7 @@ float gerstner(vec2 uv, vec2 dir, float wlen, float amp, float spd) {
 
 float baseHeight(vec2 uv) {
   float w = uWind;
-  float windStrength = smoothstep(0.02, 0.22, abs(w));
+  float windStrength = smoothstep(0.01, 0.11, abs(w));
   vec2 d0 = normalize(vec2(1.0 + w * 0.6,  0.4));
   vec2 d1 = normalize(vec2(0.7 + w * 0.4,  1.0));
   vec2 d2 = normalize(vec2(-0.4 + w * 0.3, 0.9));
@@ -599,7 +607,7 @@ void main() {
 
     // Wave-crest foam (stronger with wind)
     float wh   = baseHeight(waterUV);
-    float foam = smoothstep(0.020, 0.038, wh) * smoothstep(0.08, 0.45, abs(uWind));
+    float foam = smoothstep(0.020, 0.038, wh) * smoothstep(0.04, 0.225, abs(uWind));
     color = mix(color, vec3(0.93, 0.96, 1.0), foam * 0.52);
 
     // Raindrop splashes (bright white flashes on impact)
@@ -707,17 +715,17 @@ const DROP_MAX_AGE = 4.2;         // seconds until a drop expires
 const RANDOM_RAIN_INTERVAL = 12000;
 const RANDOM_WIND_INTERVAL = 5000;
 const RAIN_TRANSITION_RATE = 0.45;
-const WIND_TRANSITION_RATE = 1.2;
-const TIME_CYCLE_DURATION = 600;
-const MAX_EFFECTIVE_WIND = 1.0 / 7.0;
+const WIND_TRANSITION_RATE = 0.2;
+const MAX_EFFECTIVE_WIND = 1.0 / 14.0;
 
 let drops        = [];             // [{x,y,age}]
 let rainIntensity= 0.20;           // 0..1
 let rainTarget   = rainIntensity;  // 0..1
-let wind         = 0.0;            // -1/7..1/7
+let wind         = 0.0;            // -1/14..1/14
 let windTarget   = wind;
 let scene        = 0;              // 0=sky  1=neon  2=time cycle
 let timeModeStartedAt = 0;
+let timeCycleDuration = 600;       // seconds per simulated day
 
 // Float32Array laid out as [x0,y0,age0,0,  x1,y1,age1,0, ...]
 const dropBuf = new Float32Array(MAX_DROPS * 4);
@@ -800,7 +808,7 @@ function frame(ts) {
   gl.uniform1f(uloc.wind,     wind);
   const dayPhase = scene === 0 ? 0.0
     : scene === 1 ? 0.70
-    : (0.12 + (ts / 1000.0 - timeModeStartedAt) / TIME_CYCLE_DURATION) % 1.0;
+    : (0.12 + (ts / 1000.0 - timeModeStartedAt) / timeCycleDuration) % 1.0;
   gl.uniform1f(uloc.dayPhase, dayPhase);
   gl.uniform1i(uloc.numDrops, numDrops);
   gl.uniform4fv(uloc.drops,   dropBuf);
@@ -820,6 +828,8 @@ const rainSlider = document.getElementById('rainSlider');
 const windSlider = document.getElementById('windSlider');
 const rainValEl  = document.getElementById('rainVal');
 const windValEl  = document.getElementById('windVal');
+const dayLengthSlider = document.getElementById('dayLengthSlider');
+const dayLengthValEl = document.getElementById('dayLengthVal');
 const randomRain = document.getElementById('randomRain');
 const randomWind = document.getElementById('randomWind');
 const skyBtn     = document.getElementById('skyBtn');
@@ -851,6 +861,13 @@ function chooseWindTarget() {
   setWind(Math.round(Math.random() * 100.0 - 50.0));
 }
 
+function setDayLength(value) {
+  const minutes = Math.max(1, Math.min(10, Math.round(value)));
+  dayLengthSlider.value = minutes;
+  dayLengthValEl.textContent = `${minutes} min`;
+  timeCycleDuration = minutes * 60;
+}
+
 rainSlider.addEventListener('input', () => {
   randomRain.checked = false;
   setRain(rainSlider.value);
@@ -859,6 +876,10 @@ rainSlider.addEventListener('input', () => {
 windSlider.addEventListener('input', () => {
   randomWind.checked = false;
   setWind(windSlider.value);
+});
+
+dayLengthSlider.addEventListener('input', () => {
+  setDayLength(dayLengthSlider.value);
 });
 
 setInterval(() => {
