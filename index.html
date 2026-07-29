@@ -194,9 +194,9 @@
   <div class="sep"></div>
 
   <div class="ctrl-group">
-    <span class="ctrl-label">💨 Wind</span>
-    <input type="range" id="windSlider" min="-100" max="100" value="0">
-    <span class="val-display" id="windVal">0</span>
+    <span class="ctrl-label">💨 Wind variation</span>
+    <input type="range" id="windSlider" min="0" max="15" value="15">
+    <span class="val-display" id="windVal">15</span>
     <label class="random-toggle"><input type="checkbox" id="randomWind"> Random</label>
   </div>
 
@@ -683,7 +683,10 @@ const DROP_MAX_AGE = 4.2;         // seconds until a drop expires
 
 let drops        = [];             // [{x,y,age}]
 let rainIntensity= 0.20;           // 0..1
-let wind         = 0.0;            // -1..1
+let rainTarget   = rainIntensity;  // 0..1
+let wind         = 0.0;            // -1/7..1/7
+let windTarget   = wind;
+let windVariation= 1.0 / 7.0;      // maximum absolute wind
 let scene        = 0;              // 0=sky  1=neon
 
 // Float32Array laid out as [x0,y0,age0,0,  x1,y1,age1,0, ...]
@@ -735,6 +738,10 @@ function resize() {
 function frame(ts) {
   const dt = Math.min((ts - lastTimestamp) / 1000, 0.05);
   lastTimestamp = ts;
+  const smoothing = 1.0 - Math.exp(-3.0 * dt);
+  rainIntensity += (rainTarget - rainIntensity) * smoothing;
+  wind += (windTarget - wind) * smoothing;
+  if (randomRain.checked) updateRainDisplay();
 
   // FPS
   fpsAccum  += dt;
@@ -789,13 +796,24 @@ function setRain(value) {
   rainSlider.value = v;
   rainValEl.textContent = v;
   rainIntensity = v / 100.0;
+  rainTarget = rainIntensity;
 }
 
-function setWind(value) {
+function updateRainDisplay() {
+  const v = Math.round(rainIntensity * 100);
+  rainSlider.value = v;
+  rainValEl.textContent = v;
+}
+
+function setWindVariation(value) {
   const v = Math.round(value);
   windSlider.value = v;
   windValEl.textContent = v;
-  wind = v / 100.0;
+  windVariation = v / 105.0;
+}
+
+function chooseWindTarget() {
+  windTarget = (Math.random() * 2.0 - 1.0) * windVariation;
 }
 
 rainSlider.addEventListener('input', () => {
@@ -805,13 +823,23 @@ rainSlider.addEventListener('input', () => {
 
 windSlider.addEventListener('input', () => {
   randomWind.checked = false;
-  setWind(windSlider.value);
+  windTarget = 0.0;
+  setWindVariation(windSlider.value);
 });
 
 setInterval(() => {
-  if (randomRain.checked) setRain(Math.random() * 100);
-  if (randomWind.checked) setWind(Math.random() * 200 - 100);
+  if (randomRain.checked) rainTarget = Math.random();
+  if (randomWind.checked) chooseWindTarget();
 }, 1800);
+
+randomRain.addEventListener('change', () => {
+  if (randomRain.checked) rainTarget = Math.random();
+});
+
+randomWind.addEventListener('change', () => {
+  if (randomWind.checked) chooseWindTarget();
+  else windTarget = 0.0;
+});
 
 function setScene(s) {
   scene = s;
