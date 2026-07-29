@@ -10,16 +10,14 @@
     body {
       background: #030306;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
-      display: flex;
-      flex-direction: column;
       height: 100vh;
       overflow: hidden;
       color: #fff;
     }
 
     #canvas-wrap {
-      flex: 1;
-      position: relative;
+      position: fixed;
+      inset: 0;
       overflow: hidden;
     }
 
@@ -58,8 +56,14 @@
 
     /* ── Controls panel ── */
     #controls {
-      background: rgba(6,6,14,0.97);
-      border-top: 1px solid rgba(255,255,255,0.07);
+      position: fixed;
+      z-index: 1;
+      right: 16px;
+      bottom: 16px;
+      left: 16px;
+      background: rgba(6,6,14,0.82);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 8px;
       padding: 13px 22px;
       display: flex;
       align-items: center;
@@ -263,19 +267,22 @@ float gerstner(vec2 uv, vec2 dir, float wlen, float amp, float spd) {
 }
 
 float baseHeight(vec2 uv) {
-  // Wind shifts wave directions
   float w = uWind;
+  float strength = abs(w);
+  if (strength < 0.001) return 0.0;
+
+  // Wind both sets the direction and drives the otherwise still surface.
   vec2 d0 = normalize(vec2(1.0 + w * 0.6,  0.4));
   vec2 d1 = normalize(vec2(0.7 + w * 0.4,  1.0));
   vec2 d2 = normalize(vec2(-0.4 + w * 0.3, 0.9));
   vec2 d3 = normalize(vec2(1.3 + w * 0.5, -0.6));
   vec2 d4 = normalize(vec2(-0.5 + w * 0.2, -0.8));
   float h  = 0.0;
-  h += gerstner(uv, d0, 0.38, 0.016, 1.0);
-  h += gerstner(uv, d1, 0.20, 0.009, 1.2);
-  h += gerstner(uv, d2, 0.13, 0.006, 0.9);
-  h += gerstner(uv, d3, 0.09, 0.004, 1.4);
-  h += gerstner(uv, d4, 0.06, 0.002, 1.6);
+  h += gerstner(uv, d0, 0.38, 0.016 * strength, 1.0 * strength);
+  h += gerstner(uv, d1, 0.20, 0.009 * strength, 1.2 * strength);
+  h += gerstner(uv, d2, 0.13, 0.006 * strength, 0.9 * strength);
+  h += gerstner(uv, d3, 0.09, 0.004 * strength, 1.4 * strength);
+  h += gerstner(uv, d4, 0.06, 0.002 * strength, 1.6 * strength);
   return h;
 }
 
@@ -431,55 +438,21 @@ vec3 getBackground(vec3 dir) {
   return (uScene == 0) ? blueSky(dir) : nightNeon(dir);
 }
 
-// ── Rain streaks ─────────────────────────────────────────────────────────────
-
-float rainStreak(vec2 uv) {
-  if (uRain < 0.01) return 0.0;
-
-  // Tilt by wind
-  float angle = uWind * 0.38;
-  float ca = cos(angle), sa = sin(angle);
-  vec2 suv = vec2(ca * uv.x - sa * uv.y,
-                  sa * uv.x + ca * uv.y);
-
-  float cols = mix(18.0, 55.0, uRain);
-  float sx   = suv.x * cols;
-  float col  = floor(sx);
-  float cx   = fract(sx);
-
-  float h1   = hash11(col);
-  float h2   = hash11(col + 37.0);
-  float h3   = hash11(col + 73.0);
-
-  float spd  = (1.8 + h1 * 1.8) * (1.0 + uRain * 0.8);
-  float sy   = suv.y * 0.28 + uTime * spd * 0.1 + h2;
-  float cy   = fract(sy);
-
-  float len  = 0.032 + h3 * 0.048;
-  float streak = smoothstep(0.0, 0.008, cy) * smoothstep(len, len * 0.65, cy);
-
-  float w  = 0.10 + hash11(col + 111.0) * 0.12;
-  float wm = smoothstep(0.5 - w, 0.5 - w + 0.04, cx) *
-             smoothstep(0.5 + w, 0.5 + w - 0.04, cx);
-
-  return streak * wm * uRain * 0.85;
-}
-
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 void main() {
   vec2 ndc  = v_uv * 2.0 - 1.0;
   ndc.x    *= uRes.x / uRes.y;
 
-  // Camera: above water, looking slightly forward
-  vec3 camPos    = vec3(0.5, 1.2, -0.62);
-  vec3 camTarget = vec3(0.5 + uWind * 0.09, 0.0, 0.58);
+  // Downward framing keeps the water surface across the entire viewport.
+  vec3 camPos    = vec3(0.5, 1.3, -0.35);
+  vec3 camTarget = vec3(0.5 + uWind * 0.02, 0.0, 0.85);
 
   vec3 fwd   = normalize(camTarget - camPos);
   vec3 right = normalize(cross(fwd, vec3(0.0, 1.0, 0.0)));
   vec3 up    = cross(right, fwd);
 
-  float fov    = 0.72;
+  float fov    = 0.40;
   vec3  rayDir = normalize(fwd + right * ndc.x * fov + up * ndc.y * fov);
 
   // Intersect with water plane y = 0
@@ -488,14 +461,10 @@ void main() {
   vec2  waterUV = vec2(0.5);
   vec3  color   = vec3(0.0);
 
-  if (rayDir.y < -0.001) {
-    tW = -camPos.y / rayDir.y;
-    vec3 hit = camPos + rayDir * tW;
-    if (hit.x > -0.7 && hit.x < 1.7 && hit.z > -0.3 && hit.z < 2.2) {
-      onWater  = true;
-      waterUV  = hit.xz;
-    }
-  }
+  tW = -camPos.y / rayDir.y;
+  vec3 hit = camPos + rayDir * tW;
+  onWater  = true;
+  waterUV  = hit.xz;
 
   if (!onWater) {
     // Show sky / neon directly (above horizon or out of bounds)
@@ -553,13 +522,6 @@ void main() {
               ? vec3(0.50, 0.66, 0.84)
               : vec3(0.012, 0.006, 0.022);
     color = mix(color, fogC, fog * 0.45);
-  }
-
-  // Rain streaks overlay (over both water and sky regions)
-  float sk = rainStreak(v_uv);
-  if (sk > 0.0) {
-    vec3 skC = (uScene == 0) ? vec3(0.80, 0.86, 0.93) : vec3(0.28, 0.34, 0.52);
-    color = mix(color, skC * (onWater ? 1.0 : 1.5), sk * (onWater ? 0.38 : 0.58));
   }
 
   // Subtle vignette
@@ -657,7 +619,11 @@ function spawnDrops(dt) {
   const expected    = rate * dt;
   const n           = Math.floor(expected) + (Math.random() < (expected % 1) ? 1 : 0);
   for (let i = 0; i < n && drops.length < MAX_DROPS; i++) {
-    drops.push({ x: Math.random(), y: Math.random(), age: 0.0 });
+    drops.push({
+      x: Math.random() * 4.0 - 1.5,
+      y: Math.random() * 4.2 - 0.2,
+      age: 0.0,
+    });
   }
 }
 
