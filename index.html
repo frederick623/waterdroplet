@@ -194,9 +194,9 @@
   <div class="sep"></div>
 
   <div class="ctrl-group">
-    <span class="ctrl-label">💨 Wind variation</span>
-    <input type="range" id="windSlider" min="0" max="15" value="15">
-    <span class="val-display" id="windVal">15</span>
+    <span class="ctrl-label">💨 Wind</span>
+    <input type="range" id="windSlider" min="-50" max="50" value="0">
+    <span class="val-display" id="windVal">0</span>
     <label class="random-toggle"><input type="checkbox" id="randomWind"> Random</label>
   </div>
 
@@ -207,6 +207,7 @@
     <div class="scene-wrap">
       <button class="scene-btn active" id="skyBtn">☀ Day Sky</button>
       <button class="scene-btn"        id="neonBtn">🌃 Night Neon</button>
+      <button class="scene-btn"        id="timeBtn">🕒 Time</button>
     </div>
   </div>
 
@@ -234,7 +235,7 @@ uniform float uTime;
 uniform vec2  uRes;          // viewport in pixels
 uniform float uRain;         // 0..1
 uniform float uWind;         // -1..1
-uniform int   uScene;        // 0=day sky  1=night neon
+uniform float uDayPhase;    // 0=day sky  1=night neon; time mode cycles 0..1
 uniform int   uNumDrops;
 uniform vec4  uDrops[64];    // xy=waterUV pos  z=age(s)
 
@@ -453,8 +454,39 @@ vec3 nightNeon(vec3 dir) {
   return color;
 }
 
+float nightAmount() {
+  return smoothstep(0.40, 0.56, uDayPhase) *
+         (1.0 - smoothstep(0.94, 1.00, uDayPhase));
+}
+
+float darkAmount() {
+  return smoothstep(0.80, 0.90, uDayPhase) *
+         (1.0 - smoothstep(0.92, 1.00, uDayPhase));
+}
+
+float magicAmount() {
+  float sunset = smoothstep(0.34, 0.50, uDayPhase) *
+                 (1.0 - smoothstep(0.56, 0.68, uDayPhase));
+  float sunrise = smoothstep(0.90, 1.00, uDayPhase);
+  return max(sunset, sunrise);
+}
+
+vec3 magicSky(vec3 dir) {
+  float elev = max(dir.y, 0.0);
+  vec3 horizon = vec3(1.00, 0.22, 0.08);
+  vec3 zenith = vec3(0.16, 0.04, 0.28);
+  vec3 sky = mix(horizon, zenith, pow(elev, 0.42));
+  vec3 sunDir = normalize(vec3(0.45, 0.10, 0.63));
+  float sunDot = dot(dir, sunDir);
+  sky += vec3(1.0, 0.58, 0.20) * smoothstep(0.9988, 0.9996, sunDot) * 2.4;
+  sky += vec3(1.0, 0.20, 0.05) * exp((sunDot - 1.0) * 8.0) * 0.45;
+  return sky;
+}
+
 vec3 getBackground(vec3 dir) {
-  return (uScene == 0) ? blueSky(dir) : nightNeon(dir);
+  vec3 sky = mix(blueSky(dir), nightNeon(dir), nightAmount());
+  sky = mix(sky, magicSky(dir), magicAmount());
+  return mix(sky, vec3(0.002, 0.002, 0.006), darkAmount());
 }
 
 float broadGlow(vec2 uv, float center, float width, float drift) {
@@ -551,25 +583,19 @@ void main() {
     vec3 refl = getBackground(R);
 
     // Water body (refraction approximation)
-    vec3 body = (uScene == 0)
-              ? vec3(0.008, 0.028, 0.062)
-              : vec3(0.005, 0.003, 0.014);
+    float night = nightAmount();
+    vec3 body = mix(vec3(0.008, 0.028, 0.062), vec3(0.005, 0.003, 0.014), night);
 
     color = mix(body, refl, fresnel);
 
     // Specular
-    if (uScene == 0) {
-      vec3  sunD = normalize(vec3(0.45, 0.63, 0.63));
-      float sp   = pow(max(dot(R, sunD), 0.0), 320.0);
-      float spW  = pow(max(dot(R, sunD), 0.0), 28.0) * 0.07;
-      color += (sp + spW) * vec3(1.0, 0.97, 0.86) * 1.6;
-    } else {
-      // Broad, overlapping neon pools remain visible between reflected signs.
-      color += nightWaterGlow(waterUV);
-      // Soft neon specular: boost the already-captured reflection highlights
-      vec3 hdr = max(refl - vec3(0.5), vec3(0.0));
-      color += hdr * hdr * 0.35;
-    }
+    vec3  sunD = normalize(vec3(0.45, 0.63, 0.63));
+    float sp   = pow(max(dot(R, sunD), 0.0), 320.0);
+    float spW  = pow(max(dot(R, sunD), 0.0), 28.0) * 0.07;
+    color += (sp + spW) * vec3(1.0, 0.97, 0.86) * 1.6 * (1.0 - night);
+    color += nightWaterGlow(waterUV) * night;
+    vec3 hdr = max(refl - vec3(0.5), vec3(0.0));
+    color += hdr * hdr * 0.35 * night;
 
     // Wave-crest foam (stronger with wind)
     float wh   = baseHeight(waterUV);
@@ -586,16 +612,14 @@ void main() {
 
     // Atmospheric fog with distance
     float fog = 1.0 - exp(-tW * 0.038);
-    vec3 fogC = (uScene == 0)
-              ? vec3(0.50, 0.66, 0.84)
-              : vec3(0.012, 0.006, 0.022);
+    vec3 fogC = mix(vec3(0.50, 0.66, 0.84), vec3(0.012, 0.006, 0.022), night);
     color = mix(color, fogC, fog * 0.45);
   }
 
   // Rain streaks overlay (over both water and sky regions)
   float sk = rainStreak(v_uv);
   if (sk > 0.0) {
-    vec3 skC = (uScene == 0) ? vec3(0.80, 0.86, 0.93) : vec3(0.28, 0.34, 0.52);
+    vec3 skC = mix(vec3(0.80, 0.86, 0.93), vec3(0.28, 0.34, 0.52), nightAmount());
     color = mix(color, skC * (onWater ? 1.0 : 1.5), sk * (onWater ? 0.28 : 0.42));
   }
 
@@ -671,7 +695,7 @@ const uloc = {
   res      : gl.getUniformLocation(prog, 'uRes'),
   rain     : gl.getUniformLocation(prog, 'uRain'),
   wind     : gl.getUniformLocation(prog, 'uWind'),
-  scene    : gl.getUniformLocation(prog, 'uScene'),
+  dayPhase : gl.getUniformLocation(prog, 'uDayPhase'),
   numDrops : gl.getUniformLocation(prog, 'uNumDrops'),
   drops    : gl.getUniformLocation(prog, 'uDrops'),
 };
@@ -680,14 +704,20 @@ const uloc = {
 
 const MAX_DROPS  = 64;
 const DROP_MAX_AGE = 4.2;         // seconds until a drop expires
+const RANDOM_RAIN_INTERVAL = 12000;
+const RANDOM_WIND_INTERVAL = 5000;
+const RAIN_TRANSITION_RATE = 0.45;
+const WIND_TRANSITION_RATE = 1.2;
+const TIME_CYCLE_DURATION = 120;
+const MAX_EFFECTIVE_WIND = 1.0 / 7.0;
 
 let drops        = [];             // [{x,y,age}]
 let rainIntensity= 0.20;           // 0..1
 let rainTarget   = rainIntensity;  // 0..1
 let wind         = 0.0;            // -1/7..1/7
 let windTarget   = wind;
-let windVariation= 1.0 / 7.0;      // maximum absolute wind
-let scene        = 0;              // 0=sky  1=neon
+let scene        = 0;              // 0=sky  1=neon  2=time cycle
+let timeModeStartedAt = 0;
 
 // Float32Array laid out as [x0,y0,age0,0,  x1,y1,age1,0, ...]
 const dropBuf = new Float32Array(MAX_DROPS * 4);
@@ -738,9 +768,10 @@ function resize() {
 function frame(ts) {
   const dt = Math.min((ts - lastTimestamp) / 1000, 0.05);
   lastTimestamp = ts;
-  const smoothing = 1.0 - Math.exp(-3.0 * dt);
-  rainIntensity += (rainTarget - rainIntensity) * smoothing;
-  wind += (windTarget - wind) * smoothing;
+  const rainSmoothing = 1.0 - Math.exp(-RAIN_TRANSITION_RATE * dt);
+  const windSmoothing = 1.0 - Math.exp(-WIND_TRANSITION_RATE * dt);
+  rainIntensity += (rainTarget - rainIntensity) * rainSmoothing;
+  wind += (windTarget - wind) * windSmoothing;
   if (randomRain.checked) updateRainDisplay();
 
   // FPS
@@ -767,7 +798,10 @@ function frame(ts) {
   gl.uniform2f(uloc.res,      canvas.width, canvas.height);
   gl.uniform1f(uloc.rain,     rainIntensity);
   gl.uniform1f(uloc.wind,     wind);
-  gl.uniform1i(uloc.scene,    scene);
+  const dayPhase = scene === 0 ? 0.0
+    : scene === 1 ? 0.70
+    : (0.12 + (ts / 1000.0 - timeModeStartedAt) / TIME_CYCLE_DURATION) % 1.0;
+  gl.uniform1f(uloc.dayPhase, dayPhase);
   gl.uniform1i(uloc.numDrops, numDrops);
   gl.uniform4fv(uloc.drops,   dropBuf);
 
@@ -790,6 +824,7 @@ const randomRain = document.getElementById('randomRain');
 const randomWind = document.getElementById('randomWind');
 const skyBtn     = document.getElementById('skyBtn');
 const neonBtn    = document.getElementById('neonBtn');
+const timeBtn    = document.getElementById('timeBtn');
 
 function setRain(value) {
   const v = Math.round(value);
@@ -805,15 +840,15 @@ function updateRainDisplay() {
   rainValEl.textContent = v;
 }
 
-function setWindVariation(value) {
-  const v = Math.round(value);
+function setWind(value) {
+  const v = Math.max(-50, Math.min(50, Math.round(value)));
   windSlider.value = v;
   windValEl.textContent = v;
-  windVariation = v / 105.0;
+  windTarget = v / 50.0 * MAX_EFFECTIVE_WIND;
 }
 
 function chooseWindTarget() {
-  windTarget = (Math.random() * 2.0 - 1.0) * windVariation;
+  setWind(Math.round(Math.random() * 100.0 - 50.0));
 }
 
 rainSlider.addEventListener('input', () => {
@@ -823,14 +858,16 @@ rainSlider.addEventListener('input', () => {
 
 windSlider.addEventListener('input', () => {
   randomWind.checked = false;
-  windTarget = 0.0;
-  setWindVariation(windSlider.value);
+  setWind(windSlider.value);
 });
 
 setInterval(() => {
   if (randomRain.checked) rainTarget = Math.random();
+}, RANDOM_RAIN_INTERVAL);
+
+setInterval(() => {
   if (randomWind.checked) chooseWindTarget();
-}, 1800);
+}, RANDOM_WIND_INTERVAL);
 
 randomRain.addEventListener('change', () => {
   if (randomRain.checked) rainTarget = Math.random();
@@ -843,12 +880,15 @@ randomWind.addEventListener('change', () => {
 
 function setScene(s) {
   scene = s;
+  if (s === 2) timeModeStartedAt = performance.now() / 1000.0;
   skyBtn .classList.toggle('active', s === 0);
   neonBtn.classList.toggle('active', s === 1);
+  timeBtn .classList.toggle('active', s === 2);
 }
 
 skyBtn .addEventListener('click', () => setScene(0));
 neonBtn.addEventListener('click', () => setScene(1));
+timeBtn .addEventListener('click', () => setScene(2));
 
 window.addEventListener('resize', resize);
 </script>
