@@ -289,10 +289,11 @@ float rippleAt(vec2 uv, vec4 drop) {
   float r    = age * 0.27;
   float d    = length(uv - drop.xy);
   float decay= exp(-age * 1.9);
-  float rw   = 0.007 + age * 0.003;
-  float ring = exp(-pow(d - r, 2.0) / (rw * rw));
-  float wave = sin(d * 42.0 - age * 13.0);
-  return ring * wave * decay * 0.028;
+  float rw   = 0.010 + age * 0.004;
+  float offset = d - r;
+  float ring = exp(-0.5 * offset * offset / (rw * rw));
+  float wave = sin(offset * 150.0 - age * 8.0);
+  return ring * wave * decay * 0.020;
 }
 
 float splashAt(vec2 uv, vec4 drop) {
@@ -314,7 +315,7 @@ float totalHeight(vec2 uv) {
 }
 
 vec3 waterNormal(vec2 uv) {
-  const float e = 0.0028;
+  const float e = 0.0038;
   float h0 = totalHeight(uv);
   float hx = totalHeight(uv + vec2(e, 0));
   float hy = totalHeight(uv + vec2(0, e));
@@ -366,8 +367,13 @@ vec3 nightNeon(vec3 dir) {
 
   // Stars
   vec2 sv = dir.xz / (elev + 0.06) * 70.0;
-  float s  = hash21(floor(sv));
-  float sm = smoothstep(0.955, 0.975, s) * smoothstep(0.0, 0.18, elev);
+  vec2 si = floor(sv);
+  float s  = hash21(si);
+  vec2 starPos = vec2(hash21(si + 17.3), hash21(si + 53.1));
+  float starDist = length(fract(sv) - starPos);
+  float sm = smoothstep(0.955, 0.975, s) *
+             (1.0 - smoothstep(0.012, 0.028, starDist)) *
+             smoothstep(0.0, 0.18, elev);
   color += vec3(0.85, 0.90, 1.0) * sm * (sin(uTime * (s * 14.0 + 2.5)) * 0.3 + 0.7);
 
   // Moon
@@ -434,6 +440,24 @@ vec3 nightNeon(vec3 dir) {
 
 vec3 getBackground(vec3 dir) {
   return (uScene == 0) ? blueSky(dir) : nightNeon(dir);
+}
+
+float broadGlow(vec2 uv, float center, float width, float drift) {
+  float lateral = exp(-pow((uv.x - center) / width, 2.0));
+  float broken = 0.45 + 0.55 * noise2(vec2(uv.x * 9.0 + drift, uv.y * 18.0 - uTime * 0.35));
+  float rippled = 0.55 + 0.45 * sin(uv.y * 32.0 + uv.x * 14.0 + uTime * 1.8);
+  return lateral * mix(0.45, 1.0, broken * rippled);
+}
+
+vec3 nightWaterGlow(vec2 uv) {
+  float distanceFade = smoothstep(1.35, -0.35, uv.y);
+  vec3 glow = vec3(0.0);
+  glow += broadGlow(uv, -0.42, 0.28, 1.0) * vec3(0.00, 0.32, 0.46);
+  glow += broadGlow(uv, -0.12, 0.34, 2.0) * vec3(0.34, 0.04, 0.38);
+  glow += broadGlow(uv,  0.14, 0.30, 3.0) * vec3(0.52, 0.16, 0.01);
+  glow += broadGlow(uv,  0.38, 0.32, 4.0) * vec3(0.38, 0.03, 0.25);
+  glow += broadGlow(uv,  0.62, 0.27, 5.0) * vec3(0.38, 0.33, 0.01);
+  return glow * distanceFade * 0.72;
 }
 
 // ── Rain streaks ─────────────────────────────────────────────────────────────
@@ -525,6 +549,8 @@ void main() {
       float spW  = pow(max(dot(R, sunD), 0.0), 28.0) * 0.07;
       color += (sp + spW) * vec3(1.0, 0.97, 0.86) * 1.6;
     } else {
+      // Broad, overlapping neon pools remain visible between reflected signs.
+      color += nightWaterGlow(waterUV);
       // Soft neon specular: boost the already-captured reflection highlights
       vec3 hdr = max(refl - vec3(0.5), vec3(0.0));
       color += hdr * hdr * 0.35;
