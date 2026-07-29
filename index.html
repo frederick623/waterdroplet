@@ -294,7 +294,7 @@ float gerstner(vec2 uv, vec2 dir, float wlen, float amp, float spd) {
 
 float baseHeight(vec2 uv) {
   float w = uWind;
-  float windStrength = smoothstep(0.02, 0.22, abs(w));
+  float windStrength = smoothstep(0.01, 0.11, abs(w));
   vec2 d0 = normalize(vec2(1.0 + w * 0.6,  0.4));
   vec2 d1 = normalize(vec2(0.7 + w * 0.4,  1.0));
   vec2 d2 = normalize(vec2(-0.4 + w * 0.3, 0.9));
@@ -607,7 +607,7 @@ void main() {
 
     // Wave-crest foam (stronger with wind)
     float wh   = baseHeight(waterUV);
-    float foam = smoothstep(0.020, 0.038, wh) * smoothstep(0.08, 0.45, abs(uWind));
+    float foam = smoothstep(0.020, 0.038, wh) * smoothstep(0.04, 0.225, abs(uWind));
     color = mix(color, vec3(0.93, 0.96, 1.0), foam * 0.52);
 
     // Raindrop splashes (bright white flashes on impact)
@@ -721,7 +721,7 @@ const MAX_EFFECTIVE_WIND = 1.0 / 14.0;
 let drops        = [];             // [{x,y,age}]
 let rainIntensity= 0.20;           // 0..1
 let rainTarget   = rainIntensity;  // 0..1
-let wind         = 0.0;            // -1/7..1/7
+let wind         = 0.0;            // -1/14..1/14
 let windTarget   = wind;
 let scene        = 0;              // 0=sky  1=neon  2=time cycle
 let timeModeStartedAt = 0;
