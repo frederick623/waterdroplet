@@ -150,6 +150,20 @@
       color: #00c8ff;
     }
 
+    .random-toggle {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      color: rgba(255,255,255,0.42);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .random-toggle input {
+      accent-color: #00c8ff;
+      cursor: pointer;
+    }
+
     #fps {
       margin-left: auto;
       font-size: 11px;
@@ -174,6 +188,7 @@
     <span class="ctrl-label">🌧 Rain</span>
     <input type="range" id="rainSlider" min="0" max="100" value="20">
     <span class="val-display" id="rainVal">20</span>
+    <label class="random-toggle"><input type="checkbox" id="randomRain"> Random</label>
   </div>
 
   <div class="sep"></div>
@@ -182,6 +197,7 @@
     <span class="ctrl-label">💨 Wind</span>
     <input type="range" id="windSlider" min="-100" max="100" value="0">
     <span class="val-display" id="windVal">0</span>
+    <label class="random-toggle"><input type="checkbox" id="randomWind"> Random</label>
   </div>
 
   <div class="sep"></div>
@@ -286,14 +302,13 @@ float baseHeight(vec2 uv) {
 
 float rippleAt(vec2 uv, vec4 drop) {
   float age  = drop.z;
-  float r    = age * 0.27;
+  float r    = age * 0.18;
   float d    = length(uv - drop.xy);
-  float decay= exp(-age * 1.9);
-  float rw   = 0.010 + age * 0.004;
+  float decay= exp(-age * 1.35);
+  float rw   = 0.016 + age * 0.005;
   float offset = d - r;
   float ring = exp(-0.5 * offset * offset / (rw * rw));
-  float wave = sin(offset * 150.0 - age * 8.0);
-  return ring * wave * decay * 0.020;
+  return ring * decay * 0.014;
 }
 
 float splashAt(vec2 uv, vec4 drop) {
@@ -452,11 +467,11 @@ float broadGlow(vec2 uv, float center, float width, float drift) {
 vec3 nightWaterGlow(vec2 uv) {
   float distanceFade = smoothstep(1.35, -0.35, uv.y);
   vec3 glow = vec3(0.0);
-  glow += broadGlow(uv, -0.42, 0.28, 1.0) * vec3(0.00, 0.32, 0.46);
+  glow += broadGlow(uv, -0.42, 0.28, 1.0) * vec3(0.00, 0.22, 0.72);
   glow += broadGlow(uv, -0.12, 0.34, 2.0) * vec3(0.34, 0.04, 0.38);
   glow += broadGlow(uv,  0.14, 0.30, 3.0) * vec3(0.52, 0.16, 0.01);
   glow += broadGlow(uv,  0.38, 0.32, 4.0) * vec3(0.38, 0.03, 0.25);
-  glow += broadGlow(uv,  0.62, 0.27, 5.0) * vec3(0.38, 0.33, 0.01);
+  glow += broadGlow(uv,  0.62, 0.27, 5.0) * vec3(0.82, 0.62, 0.01);
   return glow * distanceFade * 0.72;
 }
 
@@ -764,20 +779,39 @@ const rainSlider = document.getElementById('rainSlider');
 const windSlider = document.getElementById('windSlider');
 const rainValEl  = document.getElementById('rainVal');
 const windValEl  = document.getElementById('windVal');
+const randomRain = document.getElementById('randomRain');
+const randomWind = document.getElementById('randomWind');
 const skyBtn     = document.getElementById('skyBtn');
 const neonBtn    = document.getElementById('neonBtn');
 
-rainSlider.addEventListener('input', () => {
-  const v = parseInt(rainSlider.value);
+function setRain(value) {
+  const v = Math.round(value);
+  rainSlider.value = v;
   rainValEl.textContent = v;
   rainIntensity = v / 100.0;
+}
+
+function setWind(value) {
+  const v = Math.round(value);
+  windSlider.value = v;
+  windValEl.textContent = v;
+  wind = v / 100.0;
+}
+
+rainSlider.addEventListener('input', () => {
+  randomRain.checked = false;
+  setRain(rainSlider.value);
 });
 
 windSlider.addEventListener('input', () => {
-  const v = parseInt(windSlider.value);
-  windValEl.textContent = v;
-  wind = v / 100.0;
+  randomWind.checked = false;
+  setWind(windSlider.value);
 });
+
+setInterval(() => {
+  if (randomRain.checked) setRain(Math.random() * 100);
+  if (randomWind.checked) setWind(Math.random() * 200 - 100);
+}, 1800);
 
 function setScene(s) {
   scene = s;
